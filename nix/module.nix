@@ -13,7 +13,7 @@ let
   inherit (pkgs.stdenv.hostPlatform) system;
   inherit (cfg.services.comin) package;
 
-  remoteWithAuth = lib.findFirst (r: r.auth.access_token_path != "") null cfg.services.comin.remotes;
+  remoteWithAuth = lib.findFirst (r: r.auth.access_token_path != "") null cfg.services.comin.fetcher.git.remotes;
 
   # This is needed because Nix's flake fetcher shells out to git for
   # submodule operations, and git has no other way to authenticate.
@@ -38,7 +38,7 @@ in
         message = "comin: ${system} is not supported by the Flake.";
       }
     ]
-    ++ lib.forEach cfg.services.comin.remotes (remote: {
+    ++ lib.forEach cfg.services.comin.fetcher.git.remotes (remote: {
       assertion = !(remote.auth.access_token_path != "" && remote.auth.ssh_deploy_key_path != "");
       message = "comin: remote `${remote.name}` sets both `auth.access_token_path` and `auth.ssh_deploy_key_path`; set at most one.";
     });
@@ -68,7 +68,7 @@ in
         CURL_CA_BUNDLE = cfg.security.pki.caBundle;
       }
       // cfg.networking.proxy.envVars
-      // (lib.optionalAttrs (cfg.services.comin.submodules && remoteWithAuth != null) {
+      // (lib.optionalAttrs (cfg.services.comin.fetcher.git.submodules && remoteWithAuth != null) {
         GIT_ASKPASS = gitAskpass;
       });
       serviceConfig = {

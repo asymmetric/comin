@@ -4,59 +4,65 @@
   lib,
   ...
 }:
+with lib;
+with types;
 let
   cfg = config.services.comin;
-in
-{
-  imports = [
-    (lib.mkRenamedOptionModule
-      [ "services" "comin" "flakeSubdirectory" ]
-      [ "services" "comin" "repositorySubdir" ]
-    )
-    (lib.mkIf cfg.enable {
-      assertions = [
-        {
-          assertion = cfg.hostname != null && cfg.hostname != "";
-          message = "You must set `networking.hostName` or `services.comin.hostname` explicitly in your NixOS configuration.";
-        }
-        {
-          assertion = cfg.repositoryType == "nix" || cfg.repositoryType == "flake" && cfg.systemAttr == null;
-          message = "When the `services.comin.repositoryType` is `flake`, the configuration attribute `services.comin.systemAttr` must not be set.";
-        }
-        {
-          assertion = cfg.repositoryType == "flake" || cfg.repositoryType == "nix" && cfg.systemAttr != null;
-          message = "When the `services.comin.repositoryType` is `nix`, the the configuration attribute `services.comin.systemAttr` must be set.";
-        }
-      ];
-    })
-  ];
-  options =
+  niks3Remote = submodule {
+    options = {
+      url = mkOption {
+        type = str;
+        example = "http://cache.example.com/pins/myhost";
+        description = ''
+          The URL of a niks3 pin. A GET on it returns the pinned store
+          path as plain text (niks3 serves pins at `<cache-url>/pins/<name>`).
+        '';
+      };
+      operation = mkOption {
+        type = enum [
+          "switch"
+          "test"
+          "boot"
+        ];
+        default = "switch";
+        description = ''
+          The switch-to-configuration operation used to deploy this pin.
+        '';
+      };
+      poller = mkOption {
+        default = { };
+        description = "Polling options for this pin.";
+        type = submodule {
+          options.period = mkOption {
+            type = int;
+            default = 10;
+            description = ''
+              The period in seconds between two fetches of the pin.
+            '';
+          };
+        };
+      };
+    };
+  };
+  fetcherNiks3Options = submodule {
+    options = {
+      remotes = mkOption {
+        type = attrsOf niks3Remote;
+        default = { };
+        description = ''
+          The niks3 pins to follow, by name. When several pins are
+          configured, the one whose store path changed most recently is
+          deployed.
+        '';
+      };
+    };
+  };
+
+  fetcherGitOptions =
     with lib;
     with types;
-    {
-      services.comin = {
-        enable = mkOption {
-          type = types.bool;
-          default = false;
-          description = ''
-            Whether to run the comin service.
-          '';
-        };
-        package = lib.mkPackageOption pkgs "comin" { nullable = true; } // {
-          defaultText = "pkgs.comin or comin.packages.\${system}.default or null";
-        };
-        hostname = mkOption {
-          type = str;
-          default = config.networking.hostName;
-          defaultText = lib.literalExpression "config.networking.hostName";
-          description = ''
-            The name of the configuration to evaluate and deploy.
-            This value is used by comin to evaluate the flake output
-            nixosConfigurations."<hostname>" or darwinConfigurations."<hostname>".
-            Defaults to networking.hostName - you MUST set either this option
-            or networking.hostName in your configuration.
-          '';
-        };
+    submodule {
+      options = {
         repositoryType = mkOption {
           type = enum [
             "flake"
@@ -91,65 +97,6 @@ in
             Whether to fetch and include Git submodules when cloning the repository.
             When enabled, this adds ?submodules=1 to the flake URL.
           '';
-        };
-        evalTimeout = mkOption {
-          type = int;
-          default = 1800;
-          description = ''
-            Maximum duration in seconds for a Nix evaluation (flake/nix eval)
-            before comin cancels it.
-          '';
-        };
-        buildTimeout = mkOption {
-          type = int;
-          default = 1800;
-          description = ''
-            Maximum duration in seconds for a Nix build before comin cancels it.
-          '';
-        };
-        buildAttemptsLimit = mkOption {
-          type = int;
-          default = 0;
-          description = ''
-            Maximum number of build attempts before giving up. When set to 0,
-            comin will retry forever on build failures.
-          '';
-        };
-        buildRetryTimer = mkOption {
-          type = int;
-          default = 30;
-          description = ''
-            Duration in seconds between each build retry attempt.
-          '';
-        };
-        exporter = mkOption {
-          description = "Options for the Prometheus exporter.";
-          default = { };
-          type = submodule {
-            options = {
-              listen_address = mkOption {
-                type = str;
-                description = ''
-                  Address to listen on for the Prometheus exporter. Empty string will listen on all interfaces.
-                '';
-                default = "";
-              };
-              port = mkOption {
-                type = int;
-                description = ''
-                  Port to listen on for the Prometheus exporter.
-                '';
-                default = 4243;
-              };
-              openFirewall = mkOption {
-                type = types.bool;
-                default = false;
-                description = ''
-                  Open port in firewall for incoming connections to the Prometheus exporter.
-                '';
-              };
-            };
-          };
         };
         remotes = mkOption {
           description = "Ordered list of repositories to pull.";
@@ -285,6 +232,170 @@ in
               };
             };
           });
+        };
+      };
+    };
+in
+{
+  imports = [
+    (lib.mkRenamedOptionModule
+      [ "services" "comin" "flakeSubdirectory" ]
+      [ "services" "comin" "repositorySubdir" ]
+    )
+    (lib.mkRenamedOptionModule
+      [ "services" "comin" "repositorySubdir" ]
+      [ "services" "comin" "fetcher" "git" "repositorySubdir" ]
+    )
+    (lib.mkRenamedOptionModule
+      [ "services" "comin" "repositoryType" ]
+      [ "services" "comin" "fetcher" "git" "repositoryType" ]
+    )
+    (lib.mkRenamedOptionModule
+      [ "services" "comin" "submodules" ]
+      [ "services" "comin" "fetcher" "git" "submodules" ]
+    )
+    (lib.mkRenamedOptionModule
+      [ "services" "comin" "systemAttr" ]
+      [ "services" "comin" "fetcher" "git" "systemAttr" ]
+    )
+    (lib.mkRenamedOptionModule
+      [ "services" "comin" "remotes" ]
+      [ "services" "comin" "fetcher" "git" "remotes" ]
+    )
+    (lib.mkIf cfg.enable {
+      assertions = [
+        {
+          assertion = cfg.hostname != null && cfg.hostname != "";
+          message = "You must set `networking.hostName` or `services.comin.hostname` explicitly in your NixOS configuration.";
+        }
+        {
+          assertion = cfg.fetcher.git.repositoryType == "nix" || cfg.fetcher.git.repositoryType == "flake" && cfg.fetcher.git.systemAttr == null;
+          message = "When the `services.comin.fetcher.git.repositoryType` is `flake`, the configuration attribute `services.comin.fetcher.git.systemAttr` must not be set.";
+        }
+        {
+          assertion = cfg.fetcher.git.repositoryType == "flake" || cfg.fetcher.git.repositoryType == "nix" && cfg.fetcher.git.systemAttr != null;
+          message = "When the `services.comin.fetcher.git.repositoryType` is `nix`, the the configuration attribute `services.comin.fetcher.git.systemAttr` must be set.";
+        }
+      ];
+    })
+  ];
+  options =
+    with lib;
+    with types;
+    {
+      services.comin = {
+        enable = mkOption {
+          type = types.bool;
+          default = false;
+          description = ''
+            Whether to run the comin service.
+          '';
+        };
+        package = lib.mkPackageOption pkgs "comin" { nullable = true; } // {
+          defaultText = "pkgs.comin or comin.packages.\${system}.default or null";
+        };
+        hostname = mkOption {
+          type = str;
+          default = config.networking.hostName;
+          defaultText = lib.literalExpression "config.networking.hostName";
+          description = ''
+            The name of the configuration to evaluate and deploy.
+            This value is used by comin to evaluate the flake output
+            nixosConfigurations."<hostname>" or darwinConfigurations."<hostname>".
+            Defaults to networking.hostName - you MUST set either this option
+            or networking.hostName in your configuration.
+          '';
+        };
+        fetcher = mkOption {
+          description = "Options for the fetcher.";
+          default = { };
+          type = submodule {
+            options = {
+              type = mkOption {
+                type = enum [
+                  "git"
+                  "niks3"
+                ];
+                default = "git";
+                description = ''
+                  Either a git or niks3 fetcher. Currently, it is not possible to use two fetchers at the same time.
+                '';
+              };
+              git = mkOption {
+                type = fetcherGitOptions;
+                default = { };
+                description = ''
+                  Configuration for the git fetcher.
+                '';
+              };
+              niks3 = mkOption {
+                type = fetcherNiks3Options;
+                default = { };
+                description = ''
+                  Configuration for the niks3 fetcher.
+                '';
+              };
+            };
+          };
+        };
+        evalTimeout = mkOption {
+          type = int;
+          default = 1800;
+          description = ''
+            Maximum duration in seconds for a Nix evaluation (flake/nix eval)
+            before comin cancels it.
+          '';
+        };
+        buildTimeout = mkOption {
+          type = int;
+          default = 1800;
+          description = ''
+            Maximum duration in seconds for a Nix build before comin cancels it.
+          '';
+        };
+        buildAttemptsLimit = mkOption {
+          type = int;
+          default = 0;
+          description = ''
+            Maximum number of build attempts before giving up. When set to 0,
+            comin will retry forever on build failures.
+          '';
+        };
+        buildRetryTimer = mkOption {
+          type = int;
+          default = 30;
+          description = ''
+            Duration in seconds between each build retry attempt.
+          '';
+        };
+        exporter = mkOption {
+          description = "Options for the Prometheus exporter.";
+          default = { };
+          type = submodule {
+            options = {
+              listen_address = mkOption {
+                type = str;
+                description = ''
+                  Address to listen on for the Prometheus exporter. Empty string will listen on all interfaces.
+                '';
+                default = "";
+              };
+              port = mkOption {
+                type = int;
+                description = ''
+                  Port to listen on for the Prometheus exporter.
+                '';
+                default = 4243;
+              };
+              openFirewall = mkOption {
+                type = types.bool;
+                default = false;
+                description = ''
+                  Open port in firewall for incoming connections to the Prometheus exporter.
+                '';
+              };
+            };
+          };
         };
         debug = mkOption {
           type = types.bool;

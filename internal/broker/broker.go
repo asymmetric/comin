@@ -76,12 +76,12 @@ func (b *Broker) Subscribe(name string) chan *protobuf.Event {
 // If the filter is nil, all events will be delivered (same as Subscribe())
 func (b *Broker) SubscribeWithFilter(name string, filter Filter) chan *protobuf.Event {
 	msgCh := make(chan *protobuf.Event, 5)
-	
+
 	// Default to accept all events if no filter is provided
 	if filter == nil {
 		filter = func(*protobuf.Event) bool { return true }
 	}
-	
+
 	b.mu.Lock()
 	b.subscribers = append(b.subscribers, &subscription{
 		name:    name,
@@ -89,14 +89,14 @@ func (b *Broker) SubscribeWithFilter(name string, filter Filter) chan *protobuf.
 		filter:  filter,
 	})
 	b.mu.Unlock()
-	
+
 	return msgCh
 }
 
 func (b *Broker) Unsubscribe(msgCh chan *protobuf.Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	
+
 	for i, sub := range b.subscribers {
 		if sub.channel == msgCh {
 			// Remove this subscription by swapping with the last element and popping

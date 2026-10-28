@@ -8,9 +8,9 @@ import (
 
 	"github.com/gen2brain/beeep"
 	"github.com/nlewo/comin/internal/builder"
+	"github.com/nlewo/comin/internal/store"
 	"github.com/nlewo/comin/pkg/client"
 	"github.com/nlewo/comin/pkg/protobuf"
-	"github.com/nlewo/comin/internal/store"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -73,7 +73,7 @@ func scenario() {
 	time.Sleep(time.Second)
 
 	d := protobuf.Deployment{
-		Status:    store.StatusToString(store.Init),
+		Status:     store.StatusToString(store.Init),
 		Generation: &g,
 	}
 	e = protobuf.Event{Type: &protobuf.Event_DeploymentStartedType{DeploymentStartedType: &protobuf.Event_DeploymentStarted{Deployment: &d}}}
@@ -81,7 +81,7 @@ func scenario() {
 	time.Sleep(time.Second)
 
 	d = protobuf.Deployment{
-		Status:    store.StatusToString(store.Done),
+		Status:     store.StatusToString(store.Done),
 		Generation: &g,
 	}
 	e = protobuf.Event{Type: &protobuf.Event_DeploymentFinishedType{DeploymentFinishedType: &protobuf.Event_DeploymentFinished{Deployment: &d}}}

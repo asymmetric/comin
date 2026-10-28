@@ -35,17 +35,17 @@ const (
 )
 
 type Builder struct {
-	store                *store.Store
-	executor             executor.Executor
-	broker               *broker.Broker
-	hostname             string
-	repositoryPath       string
-	repositoryDir        string
-	systemAttr           string
-	submodules           bool
-	evalTimeout          time.Duration
-	buildTimeout         time.Duration
-	buildAttemptsLimit   int
+	store                   *store.Store
+	executor                executor.Executor
+	broker                  *broker.Broker
+	hostname                string
+	repositoryPath          string
+	repositoryDir           string
+	systemAttr              string
+	submodules              bool
+	evalTimeout             time.Duration
+	buildTimeout            time.Duration
+	buildAttemptsLimit      int
 	buildRetryTimerDuration time.Duration
 
 	mu           sync.Mutex
@@ -74,9 +74,9 @@ type Builder struct {
 	postBuildCommand string
 
 	// Retry fields
-	buildRetryAt   *timestamppb.Timestamp
-	buildRetryTimer *time.Timer
-	buildRetryCtx   context.Context
+	buildRetryAt     *timestamppb.Timestamp
+	buildRetryTimer  *time.Timer
+	buildRetryCtx    context.Context
 	buildRetryCancel context.CancelFunc
 }
 
@@ -85,24 +85,23 @@ func New(store *store.Store, executor executor.Executor, broker *broker.Broker, 
 		repositoryPath, repositoryDir, systemAttr, hostname, submodules, evalTimeout.Seconds(), buildTimeout.Seconds(), buildAttemptsLimit, buildRetryTimer.Seconds(), postBuildCommand)
 
 	return &Builder{
-		store:            store,
-		executor:         executor,
-		broker:           broker,
-		repositoryPath:   repositoryPath,
-		repositoryDir:    repositoryDir,
-		systemAttr:       systemAttr,
-		submodules:       submodules,
-		hostname:         hostname,
-		evalTimeout:      evalTimeout,
-		buildTimeout:     buildTimeout,
-		buildAttemptsLimit:   buildAttemptsLimit,
+		store:                   store,
+		executor:                executor,
+		broker:                  broker,
+		repositoryPath:          repositoryPath,
+		repositoryDir:           repositoryDir,
+		systemAttr:              systemAttr,
+		submodules:              submodules,
+		hostname:                hostname,
+		evalTimeout:             evalTimeout,
+		buildTimeout:            buildTimeout,
+		buildAttemptsLimit:      buildAttemptsLimit,
 		buildRetryTimerDuration: buildRetryTimer,
-		postBuildCommand: postBuildCommand,
-		EvaluationDone:   make(chan string, 1),
-		BuildDone:        make(chan string, 1),
-		evaluatorWg:      &sync.WaitGroup{},
-		buildatorWg:      &sync.WaitGroup{},
-
+		postBuildCommand:        postBuildCommand,
+		EvaluationDone:          make(chan string, 1),
+		BuildDone:               make(chan string, 1),
+		evaluatorWg:             &sync.WaitGroup{},
+		buildatorWg:             &sync.WaitGroup{},
 	}
 }
 
@@ -272,13 +271,14 @@ func (r *Evaluator) Run(ctx context.Context) (err error) {
 
 type Buildator struct {
 	drvPath   string
+	outPath   string
 	buildFunc executor.BuildFunc
 	stdout    io.WriteCloser
 	stderr    io.WriteCloser
 }
 
 func (r *Buildator) Run(ctx context.Context) (err error) {
-	return r.buildFunc(ctx, r.drvPath, r.stdout, r.stderr)
+	return r.buildFunc(ctx, r.drvPath, r.outPath, r.stdout, r.stderr)
 }
 
 // Eval evaluates a generation. It cancels current any generation
@@ -446,6 +446,7 @@ func (b *Builder) build(ctx context.Context, generationUuid string) error {
 	stdout, stderr := b.broker.GetLogger("build", generation.Uuid)
 	buildator := &Buildator{
 		drvPath:   generation.DrvPath,
+		outPath:   generation.OutPath,
 		buildFunc: b.executor.Build,
 		stdout:    stdout,
 		stderr:    stderr,

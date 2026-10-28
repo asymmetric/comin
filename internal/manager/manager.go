@@ -42,7 +42,7 @@ type Manager struct {
 	prometheus      prometheus.Prometheus
 	storage         *store.Store
 	scheduler       scheduler.Scheduler
-	Fetcher         *fetcher.GitFetcher
+	Fetcher         fetcher.Fetcher
 	Builder         *builder.Builder
 	deployer        *deployer.Deployer
 	executor        executor.Executor
@@ -54,8 +54,11 @@ type Manager struct {
 	isSuspended bool
 
 	// Store the last fetched repository state to detect updates
-	lastFetchedCommitId string
+	lastFetchedCommitId        string
 	lastFetchedBranchIsTesting *wrapperspb.BoolValue
+	// Store the last fetched niks3 pin to detect updates
+	lastFetchedPinName   string
+	lastFetchedStorePath string
 
 	broker       *broker.Broker
 	brokerEvents chan *protobuf.Event
@@ -69,7 +72,7 @@ func filterEvents(event *protobuf.Event) bool {
 func New(s *store.Store,
 	p prometheus.Prometheus,
 	sched scheduler.Scheduler,
-	fetcher *fetcher.GitFetcher,
+	fetcher fetcher.Fetcher,
 	builder *builder.Builder,
 	deployer *deployer.Deployer,
 	machineId string,
@@ -128,7 +131,9 @@ func (m *Manager) DeploymentLatestSubmit(operation string) error {
 	}
 	// If no operation is provided, use default based on branch type
 	if operation == "" {
-		if latest.Generation.Source != nil && latest.Generation.Source.GetGit() != nil && latest.Generation.Source.GetGit().SelectedBranchIsTesting != nil && latest.Generation.Source.GetGit().SelectedBranchIsTesting.Value {
+		if latest.Generation.GetSource().GetNiks3() != nil {
+			operation = m.getOperation(latest.Generation)
+		} else if latest.Generation.Source != nil && latest.Generation.Source.GetGit() != nil && latest.Generation.Source.GetGit().SelectedBranchIsTesting != nil && latest.Generation.Source.GetGit().SelectedBranchIsTesting.Value {
 			operation = "test"
 		} else {
 			operation = "switch"
@@ -173,28 +178,44 @@ func (m *Manager) FetchAndBuild(ctx context.Context) {
 		for {
 			select {
 			case e := <-m.brokerEvents:
-				if fetched := e.GetFetched(); fetched != nil {
-					rs := fetched.GetGitRepositoryStatus()
+				fetched := e.GetFetched()
+				if fetched == nil {
+					continue
+				}
+				var generation protobuf.Generation
+				switch t := fetched.Type.(type) {
+				case *protobuf.Event_Fetched_GitRepositoryStatus:
+					rs := t.GitRepositoryStatus
 					// Check if the repository has been updated by comparing with last fetched state
 					updated := m.lastFetchedCommitId != rs.SelectedCommitId ||
 						(m.lastFetchedBranchIsTesting != nil && rs.SelectedBranchIsTesting != nil &&
-						m.lastFetchedBranchIsTesting.GetValue() != rs.SelectedBranchIsTesting.GetValue())
+							m.lastFetchedBranchIsTesting.GetValue() != rs.SelectedBranchIsTesting.GetValue())
 					if !updated {
 						continue
 					}
 					// Update the stored state for next comparison
 					m.lastFetchedCommitId = rs.SelectedCommitId
 					m.lastFetchedBranchIsTesting = rs.SelectedBranchIsTesting
-					if fetched.Verified {
-						logrus.Infof("manager: a generation is evaluating for commit %s", rs.SelectedCommitId)
-						generation := m.storage.NewGeneration(m.Builder.GetHostname(), m.Builder.GetRepositoryDir(), m.Builder.GetSystemAttr(), rs, m.Builder.GetBuildAttemptsLimit())
-						err := m.Builder.Eval(ctx, &generation)
-						if err != nil {
-							logrus.Error(err)
-						}
-					} else {
+					if !fetched.Verified {
 						logrus.Infof("manager: the commit %s is not evaluated because it is not signed", rs.SelectedCommitId)
+						continue
 					}
+					logrus.Infof("manager: a generation is evaluating for commit %s", rs.SelectedCommitId)
+					generation = m.storage.NewGenerationFromGit(m.Builder.GetHostname(), m.Builder.GetRepositoryDir(), m.Builder.GetSystemAttr(), rs, m.Builder.GetBuildAttemptsLimit())
+				case *protobuf.Event_Fetched_Niks3Status:
+					pin := selectNiks3Pin(t.Niks3Status)
+					if pin == nil || (pin.Name == m.lastFetchedPinName && pin.StorePath == m.lastFetchedStorePath) {
+						continue
+					}
+					m.lastFetchedPinName = pin.Name
+					m.lastFetchedStorePath = pin.StorePath
+					logrus.Infof("manager: a generation is created for the store path %s pinned by %s", pin.StorePath, pin.Name)
+					generation = m.storage.NewGenerationFromNiks3(pin, m.Builder.GetBuildAttemptsLimit())
+				default:
+					continue
+				}
+				if err := m.Builder.Eval(ctx, &generation); err != nil {
+					logrus.Error(err)
 				}
 			case generationUUID := <-m.Builder.EvaluationDone:
 				generation, err := m.storage.GenerationGet(generationUUID)
@@ -221,9 +242,8 @@ func (m *Manager) FetchAndBuild(ctx context.Context) {
 					continue
 				}
 				if generation.BuildErr == "" {
-					git := generation.Source.GetGit()
-					logrus.Infof("manager: a generation is available for deployment with commit %s", git.SelectedCommitId)
-					operation := m.getOperationFromConfigurationOperations(git.SelectedRemoteName, git.SelectedBranchName)
+					logrus.Infof("manager: a generation is available for deployment from %s", describeSource(&generation))
+					operation := m.getOperation(&generation)
 					if !m.deployer.IsAlreadyDeployed(&generation, operation) {
 						m.DeployConfirmer.Submit(generationUUID)
 					}
@@ -236,13 +256,48 @@ func (m *Manager) FetchAndBuild(ctx context.Context) {
 					logrus.Error(err)
 					continue
 				}
-				git := generation.Source.GetGit()
-				operation := m.getOperationFromConfigurationOperations(git.SelectedRemoteName, git.SelectedBranchName)
+				operation := m.getOperation(&generation)
 				reason := fmt.Sprintf("The generation %s needs to be deployed", generationUUID)
 				m.deployer.Submit(&generation, operation, false, reason)
 			}
 		}
 	}()
+}
+
+// selectNiks3Pin returns the pin whose store path changed most recently,
+// or nil if no remote has been fetched successfully yet.
+func selectNiks3Pin(status *protobuf.Niks3Status) (selected *protobuf.PinInfo) {
+	for _, remote := range status.GetRemotes() {
+		pin := remote.GetPininfo()
+		if pin.GetStorePath() == "" || pin.GetUpdatedAt() == nil {
+			continue
+		}
+		if selected == nil || pin.UpdatedAt.AsTime().After(selected.UpdatedAt.AsTime()) {
+			selected = pin
+		}
+	}
+	return selected
+}
+
+func describeSource(g *protobuf.Generation) string {
+	if pin := g.GetSource().GetNiks3(); pin != nil {
+		return fmt.Sprintf("the niks3 pin %s (%s)", pin.Name, pin.StorePath)
+	}
+	if git := g.GetSource().GetGit(); git != nil {
+		return fmt.Sprintf("the commit %s", git.SelectedCommitId)
+	}
+	return "an unknown source"
+}
+
+// getOperation returns the configured operation for the remote (and
+// branch, for git) a generation comes from. niks3 remotes are stored in
+// ConfigurationOperations with an empty branch name.
+func (m *Manager) getOperation(g *protobuf.Generation) string {
+	if pin := g.GetSource().GetNiks3(); pin != nil {
+		return m.getOperationFromConfigurationOperations(pin.Name, "")
+	}
+	git := g.GetSource().GetGit()
+	return m.getOperationFromConfigurationOperations(git.GetSelectedRemoteName(), git.GetSelectedBranchName())
 }
 
 // ConfigurationOperations is a map describing the operation associated

@@ -23,26 +23,26 @@ func Read(path string) (config types.Configuration, err error) {
 	if err := d.Decode(&config); err != nil {
 		return config, err
 	}
-	for i, remote := range config.Remotes {
+	for i, remote := range config.Fetcher.Git.Remotes {
 		if remote.Auth.AccessTokenPath != "" {
 			content, err := os.ReadFile(remote.Auth.AccessTokenPath)
 			if err != nil {
 				return config, err
 			}
-			config.Remotes[i].Auth.AccessToken = strings.TrimSpace(string(content))
+			config.Fetcher.Git.Remotes[i].Auth.AccessToken = strings.TrimSpace(string(content))
 		}
 		// On GitLab and GitHub, any non blank username is working
 		if remote.Auth.Username == "" {
-			config.Remotes[i].Auth.Username = "comin"
+			config.Fetcher.Git.Remotes[i].Auth.Username = "comin"
 		}
 		if remote.Timeout == 0 {
-			config.Remotes[i].Timeout = 300
+			config.Fetcher.Git.Remotes[i].Timeout = 300
 		}
 		if remote.Branches.Main.Operation == "" {
-			config.Remotes[i].Branches.Main.Operation = "switch"
+			config.Fetcher.Git.Remotes[i].Branches.Main.Operation = "switch"
 		}
 		if remote.Branches.Testing.Operation == "" {
-			config.Remotes[i].Branches.Testing.Operation = "test"
+			config.Fetcher.Git.Remotes[i].Branches.Testing.Operation = "test"
 		}
 
 	}
@@ -62,12 +62,39 @@ func Read(path string) (config types.Configuration, err error) {
 	if config.StateFilepath == "" {
 		config.StateFilepath = filepath.Join(config.StateDir, "state.json")
 	}
-	if config.RepositorySubdir == "" {
-		config.RepositorySubdir = "."
+	if config.Fetcher.Git.RepositorySubdir == "" {
+		config.Fetcher.Git.RepositorySubdir = "."
 	}
-	supportedRepositoryTypes := []string{"flake", "nix"}
-	if !slices.Contains(supportedRepositoryTypes, config.RepositoryType) {
-		return config, fmt.Errorf("config: repository type is '%s' while it be one of '%s'", config.RepositoryType, supportedRepositoryTypes)
+	if config.Fetcher.Type == "" {
+		config.Fetcher.Type = "git"
+	}
+	supportedFetcherTypes := []string{"git", "niks3"}
+	if !slices.Contains(supportedFetcherTypes, config.Fetcher.Type) {
+		return config, fmt.Errorf("config: fetcher type is '%s' while it should be one of '%s'", config.Fetcher.Type, supportedFetcherTypes)
+	}
+	switch config.Fetcher.Type {
+	case "git":
+		supportedRepositoryTypes := []string{"flake", "nix"}
+		if !slices.Contains(supportedRepositoryTypes, config.Fetcher.Git.RepositoryType) {
+			return config, fmt.Errorf("config: repository type is '%s' while it be one of '%s'", config.Fetcher.Git.RepositoryType, supportedRepositoryTypes)
+		}
+	case "niks3":
+		if len(config.Fetcher.Niks3.Remotes) == 0 {
+			return config, fmt.Errorf("config: the niks3 fetcher requires at least one remote")
+		}
+		supportedOperations := []string{types.OperationSwitch, types.OperationTest, types.OperationBoot}
+		for name, remote := range config.Fetcher.Niks3.Remotes {
+			if remote.URL == "" {
+				return config, fmt.Errorf("config: the niks3 remote '%s' has no url", name)
+			}
+			if remote.Operation == "" {
+				remote.Operation = types.OperationSwitch
+			}
+			if !slices.Contains(supportedOperations, remote.Operation) {
+				return config, fmt.Errorf("config: the niks3 remote '%s' has operation '%s' while it should be one of '%s'", name, remote.Operation, supportedOperations)
+			}
+			config.Fetcher.Niks3.Remotes[name] = remote
+		}
 	}
 	if config.Grpc.UnixSocketPath == "" {
 		config.Grpc.UnixSocketPath = filepath.Join(config.StateDir, "grpc.sock")
@@ -88,10 +115,11 @@ func Read(path string) (config types.Configuration, err error) {
 func MkGitConfig(config types.Configuration) types.GitConfig {
 	return types.GitConfig{
 		Path:                  filepath.Join(config.StateDir, "repository"),
-		Dir:                   config.RepositorySubdir,
-		Remotes:               config.Remotes,
-		GpgPublicKeyPaths:     config.GpgPublicKeyPaths,
-		SshAllowedSignersPath: config.SshAllowedSignersPath,
-		Submodules:            config.Submodules,
+		Dir:                   config.Fetcher.Git.RepositorySubdir,
+		Remotes:               config.Fetcher.Git.Remotes,
+		GpgPublicKeyPaths:     config.Fetcher.Git.GpgPublicKeyPaths,
+		SshAllowedSignersPath: config.Fetcher.Git.SshAllowedSignersPath,
+		Submodules:            config.Fetcher.Git.Submodules,
+		SystemAttr:            config.Fetcher.Git.SystemAttr,
 	}
 }

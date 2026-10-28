@@ -14,35 +14,42 @@ func TestConfig(t *testing.T) {
 		StateDir:              "/var/lib/comin",
 		StateFilepath:         "/var/lib/comin/state.json",
 		PostDeploymentCommand: "/some/path",
-		RepositoryType:        "flake",
-		RepositorySubdir:      ".",
-		Remotes: []types.Remote{
-			{
-				Name: "origin",
-				URL:  "https://framagit.org/owner/infra",
-				Auth: types.Auth{
-					AccessToken:     "my-secret",
-					AccessTokenPath: "./secret",
-					Username:        "comin",
-				},
-				Timeout: 300,
-				Branches: types.Branches{
-					Main:    types.Branch{Operation: "switch"},
-					Testing: types.Branch{Operation: "test"},
-				},
-			},
-			{
-				Name: "local",
-				URL:  "/home/owner/git/infra",
-				Auth: types.Auth{
-					AccessToken:     "",
-					AccessTokenPath: "",
-					Username:        "comin",
-				},
-				Timeout: 300,
-				Branches: types.Branches{
-					Main:    types.Branch{Operation: "switch"},
-					Testing: types.Branch{Operation: "test"},
+		Fetcher: types.Fetcher{
+			Type: "git",
+			Git: types.GitFetcher{
+				RepositoryType:   "flake",
+				RepositorySubdir: ".",
+				Remotes: []types.Remote{
+					{
+						Name: "origin",
+						URL:  "https://framagit.org/owner/infra",
+						Auth: types.Auth{
+							AccessToken:     "my-secret",
+							AccessTokenPath: "./secret",
+							Username:        "comin",
+						},
+						Timeout: 300,
+						Branches: types.Branches{
+							Main:    types.Branch{Operation: "switch"},
+							Testing: types.Branch{Operation: "test"},
+						},
+						Poller: types.Poller{Period: 10},
+					},
+					{
+						Name: "local",
+						URL:  "/home/owner/git/infra",
+						Auth: types.Auth{
+							AccessToken:     "",
+							AccessTokenPath: "",
+							Username:        "comin",
+						},
+						Timeout: 300,
+						Branches: types.Branches{
+							Main:    types.Branch{Operation: "switch"},
+							Testing: types.Branch{Operation: "test"},
+						},
+						Poller: types.Poller{Period: 10},
+					},
 				},
 			},
 		},
@@ -57,8 +64,8 @@ func TestConfig(t *testing.T) {
 		Grpc: types.Grpc{
 			UnixSocketPath: "/var/lib/comin/grpc.sock",
 		},
-		EvalTimeout:    1800,
-		BuildTimeout:   1800,
+		EvalTimeout:     1800,
+		BuildTimeout:    1800,
 		BuildRetryTimer: 30,
 	}
 	config, err := Read(configPath)
