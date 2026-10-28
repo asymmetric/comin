@@ -23,8 +23,8 @@ var (
 
 // getGitFromGeneration is a helper function to safely extract Git source from a Generation
 func getGitFromGeneration(g *protobuf.Generation) *protobuf.Git {
-	if g != nil && g.Source != nil {
-		return g.Source.GetGit()
+	if git := g.GetSource().GetGit(); git != nil {
+		return git
 	}
 	return &protobuf.Git{}
 }

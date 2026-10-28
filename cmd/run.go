@@ -10,7 +10,7 @@ import (
 	"github.com/nlewo/comin/internal/config"
 	"github.com/nlewo/comin/internal/deployer"
 	executorPkg "github.com/nlewo/comin/internal/executor"
-	"github.com/nlewo/comin/internal/fetcher"
+	fetcherPkg "github.com/nlewo/comin/internal/fetcher"
 	"github.com/nlewo/comin/internal/http"
 	"github.com/nlewo/comin/internal/manager"
 	"github.com/nlewo/comin/internal/prometheus"
@@ -25,8 +25,8 @@ import (
 
 // getGitFromGeneration is a helper function to safely extract Git source from a Generation
 func getGitFromGeneration(g *protobuf.Generation) *protobuf.Git {
-	if g != nil && g.Source != nil {
-		return g.Source.GetGit()
+	if git := g.GetSource().GetGit(); git != nil {
+		return git
 	}
 	return &protobuf.Git{}
 }
@@ -61,7 +61,12 @@ var runCmd = &cobra.Command{
 		}
 
 		var executor executorPkg.Executor
-		executor, err = executorPkg.New(cfg.RepositoryType, gitConfig.Path, gitConfig.Submodules)
+		switch cfg.Fetcher.Type {
+		case "niks3":
+			executor, err = executorPkg.NewNiks3()
+		default:
+			executor, err = executorPkg.NewGit(cfg.Fetcher.Git.RepositoryType, gitConfig.Path, gitConfig.Submodules)
+		}
 		if err != nil {
 			logrus.Error(err)
 			os.Exit(1)
@@ -88,28 +93,51 @@ var runCmd = &cobra.Command{
 		}
 		metrics.SetBuildInfo(cmd.Version)
 
-		// We get the last mainCommitId to avoid useless
-		// redeployment as well as non fast forward checkouts
-		var mainCommitId string
 		var lastDeployment *protobuf.Deployment
 		if ok, ld := store.LastDeployment(); ok {
-			git := getGitFromGeneration(ld.Generation)
-			mainCommitId = git.MainCommitId
 			lastDeployment = ld
-			metrics.SetDeploymentInfo(git.SelectedCommitId, ld.Status)
-		}
-		repository, err := repository.New(gitConfig, mainCommitId, metrics)
-		if err != nil {
-			logrus.Errorf("Failed to initialize the repository: %s", err)
-			os.Exit(1)
+			metrics.SetDeploymentInfo(getGitFromGeneration(ld.Generation).SelectedCommitId, ld.Status)
 		}
 
-		fetcher := fetcher.NewGitFetcher(repository, broker)
-		fetcher.Start(cmd.Context())
+		// configurationOperations maps each remote and branch to its
+		// operation. niks3 remotes have no branch: they use the empty
+		// branch name.
+		configurationOperations := manager.ConfigurationOperations{}
+		var fetcher fetcherPkg.Fetcher
 		sched := scheduler.New()
-		sched.FetchRemotes(fetcher, cfg.Remotes)
+		switch cfg.Fetcher.Type {
+		case "niks3":
+			f := fetcherPkg.NewNiks3Fetcher(cfg.Fetcher.Niks3, broker)
+			f.Start(cmd.Context())
+			sched.FetchNiks3Remotes(f, cfg.Fetcher.Niks3.Remotes)
+			fetcher = f
+			for name, r := range cfg.Fetcher.Niks3.Remotes {
+				configurationOperations[name] = map[string]string{"": r.Operation}
+			}
+		default:
+			// We get the last mainCommitId to avoid useless
+			// redeployment as well as non fast forward checkouts
+			var mainCommitId string
+			if lastDeployment != nil {
+				mainCommitId = getGitFromGeneration(lastDeployment.Generation).MainCommitId
+			}
+			repository, err := repository.New(gitConfig, mainCommitId, metrics)
+			if err != nil {
+				logrus.Errorf("Failed to initialize the repository: %s", err)
+				os.Exit(1)
+			}
+			f := fetcherPkg.NewGitFetcher(repository, broker)
+			f.Start(cmd.Context())
+			sched.FetchRemotes(f, gitConfig.Remotes)
+			fetcher = f
+			for _, r := range gitConfig.Remotes {
+				configurationOperations[r.Name] = make(map[string]string)
+				configurationOperations[r.Name][r.Branches.Main.Name] = r.Branches.Main.Operation
+				configurationOperations[r.Name][r.Branches.Testing.Name] = r.Branches.Testing.Operation
+			}
+		}
 
-		builder := builder.New(store, executor, broker, gitConfig.Path, gitConfig.Dir, cfg.SystemAttr, cfg.Hostname, gitConfig.Submodules, time.Duration(cfg.EvalTimeout)*time.Second, time.Duration(cfg.BuildTimeout)*time.Second, cfg.BuildAttemptsLimit, time.Duration(cfg.BuildRetryTimer)*time.Second, cfg.PostBuildCommand)
+		builder := builder.New(store, executor, broker, gitConfig.Path, gitConfig.Dir, gitConfig.SystemAttr, cfg.Hostname, gitConfig.Submodules, time.Duration(cfg.EvalTimeout)*time.Second, time.Duration(cfg.BuildTimeout)*time.Second, cfg.BuildAttemptsLimit, time.Duration(cfg.BuildRetryTimer)*time.Second, cfg.PostBuildCommand)
 		deployer := deployer.New(store, executor.Deploy, lastDeployment, cfg.PostDeploymentCommand, broker)
 
 		mode, err := manager.ParseMode(cfg.BuildConfirmer.Mode)
@@ -127,12 +155,6 @@ var runCmd = &cobra.Command{
 		deployConfirmer := manager.NewConfirmer(broker, mode, time.Duration(cfg.DeployConfirmer.AutoDuration)*time.Second, "deploy")
 		deployConfirmer.Start()
 
-		configurationOperations := manager.ConfigurationOperations{}
-		for _, r := range cfg.Remotes {
-			configurationOperations[r.Name] = make(map[string]string)
-			configurationOperations[r.Name][r.Branches.Main.Name] = r.Branches.Main.Operation
-			configurationOperations[r.Name][r.Branches.Testing.Name] = r.Branches.Testing.Operation
-		}
 		manager := manager.New(store, metrics, sched, fetcher, builder, deployer, machineId, cfg.Hostname, executor, buildConfirmer, deployConfirmer, broker, configurationOperations)
 
 		http.Serve(manager,

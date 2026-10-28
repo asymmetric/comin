@@ -24,23 +24,34 @@ func New() Scheduler {
 	return sched
 }
 
-func (s Scheduler) FetchRemotes(fetcher *fetcher.GitFetcher, remotes []types.Remote) {
+func (s Scheduler) FetchRemotes(fetcher fetcher.Fetcher, remotes []types.Remote) {
 	for _, remote := range remotes {
-		if remote.Poller.Period != 0 {
-			logrus.Infof("scheduler: starting the period job for the remote '%s' with period %ds", remote.Name, remote.Poller.Period)
-			_, _ = s.s.NewJob(
-				gocron.DurationJob(
-					time.Duration(remote.Poller.Period)*time.Second,
-				),
-				gocron.NewTask(
-					func() {
-						logrus.Debugf("scheduler: running task for remote %s", remote.Name)
-						fetcher.TriggerFetch([]string{remote.Name})
-					},
-				),
-				gocron.WithSingletonMode(gocron.LimitModeReschedule),
-				gocron.WithName(fmt.Sprintf("fetch-remote-%s", remote.Name)),
-			)
-		}
+		s.fetchRemote(fetcher, remote.Name, remote.Poller.Period)
 	}
+}
+
+func (s Scheduler) FetchNiks3Remotes(fetcher fetcher.Fetcher, remotes map[string]types.Niks3Remote) {
+	for name, remote := range remotes {
+		s.fetchRemote(fetcher, name, remote.Poller.Period)
+	}
+}
+
+func (s Scheduler) fetchRemote(fetcher fetcher.Fetcher, name string, period int) {
+	if period == 0 {
+		return
+	}
+	logrus.Infof("scheduler: starting the period job for the remote '%s' with period %ds", name, period)
+	_, _ = s.s.NewJob(
+		gocron.DurationJob(
+			time.Duration(period)*time.Second,
+		),
+		gocron.NewTask(
+			func() {
+				logrus.Debugf("scheduler: running task for remote %s", name)
+				fetcher.TriggerFetch([]string{name})
+			},
+		),
+		gocron.WithSingletonMode(gocron.LimitModeReschedule),
+		gocron.WithName(fmt.Sprintf("fetch-remote-%s", name)),
+	)
 }

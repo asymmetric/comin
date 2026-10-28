@@ -112,7 +112,25 @@ func StringToBuildStatus(statusStr string) BuildStatus {
 	}
 }
 
-func (s *Store) NewGeneration(hostname, repositoryDir, systemAttr string, rs *protobuf.GitRepositoryStatus, buildAttemptsLimit int) (g protobuf.Generation) {
+// NewGenerationFromNiks3 creates a generation for the store path of a niks3 pin.
+func (s *Store) NewGenerationFromNiks3(pin *protobuf.PinInfo, buildAttemptsLimit int) (g protobuf.Generation) {
+	g = protobuf.Generation{
+		Uuid: uuid.New().String(),
+		Source: &protobuf.Source{
+			Source: &protobuf.Source_Niks3{
+				Niks3: pin,
+			},
+		},
+		EvalStatus:         EvalInit.String(),
+		BuildStatus:        BuildInit.String(),
+		AttemptNumber:      0,
+		BuildAttemptsLimit: int32(buildAttemptsLimit),
+	}
+	s.persisted.Generations = append(s.persisted.Generations, &g)
+	return
+}
+
+func (s *Store) NewGenerationFromGit(hostname, repositoryDir, systemAttr string, rs *protobuf.GitRepositoryStatus, buildAttemptsLimit int) (g protobuf.Generation) {
 	// Find the selected remote URL
 	selectedRemoteUrl := ""
 	for _, remote := range rs.Remotes {
@@ -123,7 +141,7 @@ func (s *Store) NewGeneration(hostname, repositoryDir, systemAttr string, rs *pr
 	}
 
 	g = protobuf.Generation{
-		Uuid:   uuid.New().String(),
+		Uuid: uuid.New().String(),
 		Source: &protobuf.Source{
 			Source: &protobuf.Source_Git{
 				Git: &protobuf.Git{
@@ -142,9 +160,9 @@ func (s *Store) NewGeneration(hostname, repositoryDir, systemAttr string, rs *pr
 				},
 			},
 		},
-		EvalStatus:   EvalInit.String(),
-		BuildStatus: BuildInit.String(),
-		AttemptNumber: 0,
+		EvalStatus:         EvalInit.String(),
+		BuildStatus:        BuildInit.String(),
+		AttemptNumber:      0,
 		BuildAttemptsLimit: int32(buildAttemptsLimit),
 	}
 	s.persisted.Generations = append(s.persisted.Generations, &g)
