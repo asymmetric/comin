@@ -16,35 +16,31 @@ import (
 func TestFetch(t *testing.T) {
 	// Create a test server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"name":"test-pin","store_path":"/nix/store/path","created_at":"2024-01-01","updated_at":"2024-01-02"}`))
+		w.Write([]byte("/nix/store/path\n")) // nolint: errcheck
 	}))
 	defer ts.Close()
 
-	pinInfo, err := fetch(ts.URL)
+	storePath, err := fetch(ts.URL)
 	assert.NoError(t, err)
-	assert.NotNil(t, pinInfo)
-	assert.Equal(t, "test-pin", pinInfo.Name)
-	assert.Equal(t, "/nix/store/path", pinInfo.StorePath)
-	assert.NotNil(t, pinInfo.CreatedAt)
-	assert.Equal(t, "2024-01-01T00:00:00Z", pinInfo.CreatedAt.AsTime().Format(time.RFC3339))
-	assert.NotNil(t, pinInfo.UpdatedAt)
-	assert.Equal(t, "2024-01-02T00:00:00Z", pinInfo.UpdatedAt.AsTime().Format(time.RFC3339))
+	assert.Equal(t, "/nix/store/path", storePath)
 }
 
-func TestFetchInvalidJSON(t *testing.T) {
-	// Create a test server that returns invalid JSON
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{invalid json}`))
-	}))
-	defer ts.Close()
+func TestFetchInvalidStorePath(t *testing.T) {
+	for _, body := range []string{"<html>", "/nix/store/a\n/nix/store/b"} {
+		// Create a test server that doesn't return a store path
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(body)) // nolint: errcheck
+		}))
+		defer ts.Close()
 
-	pinInfo, err := fetch(ts.URL)
-	assert.Error(t, err)
-	assert.Nil(t, pinInfo)
+		storePath, err := fetch(ts.URL)
+		assert.Error(t, err)
+		assert.Empty(t, storePath)
+	}
 }
 
 func TestFetchServerError(t *testing.T) {
@@ -54,23 +50,23 @@ func TestFetchServerError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	pinInfo, err := fetch(ts.URL)
+	storePath, err := fetch(ts.URL)
 	assert.Error(t, err)
-	assert.Nil(t, pinInfo)
+	assert.Empty(t, storePath)
 }
 
 func TestFetchInvalidURL(t *testing.T) {
-	pinInfo, err := fetch("http://invalid-url-that-does-not-exist")
+	storePath, err := fetch("http://invalid-url-that-does-not-exist")
 	assert.Error(t, err)
-	assert.Nil(t, pinInfo)
+	assert.Empty(t, storePath)
 }
 
 func TestNiks3FetcherStart(t *testing.T) {
-	// Create a test server with RFC3339 timestamp
+	// Create a test server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"name":"test-pin","store_path":"/nix/store/path","created_at":"2024-01-01T00:00:00Z","updated_at":"2024-01-02T12:00:00Z"}`))
+		w.Write([]byte("/nix/store/path")) // nolint: errcheck
 	}))
 	defer ts.Close()
 
@@ -111,12 +107,10 @@ func TestNiks3FetcherStart(t *testing.T) {
 		assert.True(c, niks3Status.Niks3Status.Remotes[0].Fetched.GetValue())
 		// Verify PinInfo is set
 		assert.NotNil(c, niks3Status.Niks3Status.Remotes[0].Pininfo)
-		assert.Equal(c, "test-pin", niks3Status.Niks3Status.Remotes[0].Pininfo.Name)
+		assert.Equal(c, "test-remote", niks3Status.Niks3Status.Remotes[0].Pininfo.Name)
 		assert.Equal(c, "/nix/store/path", niks3Status.Niks3Status.Remotes[0].Pininfo.StorePath)
 		assert.NotNil(c, niks3Status.Niks3Status.Remotes[0].Pininfo.CreatedAt)
-		assert.Equal(c, "2024-01-01T00:00:00Z", niks3Status.Niks3Status.Remotes[0].Pininfo.CreatedAt.AsTime().Format(time.RFC3339))
 		assert.NotNil(c, niks3Status.Niks3Status.Remotes[0].Pininfo.UpdatedAt)
-		assert.Equal(c, "2024-01-02T12:00:00Z", niks3Status.Niks3Status.Remotes[0].Pininfo.UpdatedAt.AsTime().Format(time.RFC3339))
 		// Verify FetchedAt timestamp is set
 		assert.NotNil(c, niks3Status.Niks3Status.Remotes[0].FetchedAt)
 	}, 5*time.Second, 100*time.Millisecond, "expected Fetched event not received")
@@ -131,41 +125,47 @@ func TestNiks3FetcherStart(t *testing.T) {
 	assert.True(t, niks3Status.Niks3Status.Remotes[0].Fetched.GetValue())
 	// Verify PinInfo is set in state
 	assert.NotNil(t, niks3Status.Niks3Status.Remotes[0].Pininfo)
-	assert.Equal(t, "test-pin", niks3Status.Niks3Status.Remotes[0].Pininfo.Name)
+	assert.Equal(t, "test-remote", niks3Status.Niks3Status.Remotes[0].Pininfo.Name)
 	assert.Equal(t, "/nix/store/path", niks3Status.Niks3Status.Remotes[0].Pininfo.StorePath)
 	assert.NotNil(t, niks3Status.Niks3Status.Remotes[0].Pininfo.CreatedAt)
-	assert.Equal(t, "2024-01-01T00:00:00Z", niks3Status.Niks3Status.Remotes[0].Pininfo.CreatedAt.AsTime().Format(time.RFC3339))
 	assert.NotNil(t, niks3Status.Niks3Status.Remotes[0].Pininfo.UpdatedAt)
-	assert.Equal(t, "2024-01-02T12:00:00Z", niks3Status.Niks3Status.Remotes[0].Pininfo.UpdatedAt.AsTime().Format(time.RFC3339))
 	// Verify FetchedAt timestamp is set
 	assert.NotNil(t, niks3Status.Niks3Status.Remotes[0].FetchedAt)
 }
 
 func TestNiks3FetcherUpdatedComparison(t *testing.T) {
-	// Create a test server with a newer timestamp
-	newerTs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+	// Create a test server with a store path
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"name":"test-pin","store_path":"/nix/store/path","created_at":"2024-01-01T00:00:00Z","updated_at":"2024-01-03T12:00:00Z"}`))
+		w.Write([]byte("/nix/store/path")) // nolint: errcheck
 	}))
-	defer newerTs.Close()
+	defer ts.Close()
 
-	// Create a test server with an older timestamp
-	olderTs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+	// Create another test server with the same store path
+	sameTs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"name":"test-pin","store_path":"/nix/store/path","created_at":"2024-01-01T00:00:00Z","updated_at":"2024-01-01T12:00:00Z"}`))
+		w.Write([]byte("/nix/store/path")) // nolint: errcheck
 	}))
-	defer olderTs.Close()
+	defer sameTs.Close()
 
-	// Create broker and fetcher with newer timestamp
+	// Create a test server with another store path
+	otherTs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("/nix/store/other-path")) // nolint: errcheck
+	}))
+	defer otherTs.Close()
+
+	// Create broker and fetcher
 	bk := broker.New()
 	bk.Start()
 	defer bk.Stop()
 
 	config := types.Niks3Fetcher{
 		Remotes: map[string]types.Niks3Remote{
-			"test-remote": {URL: newerTs.URL},
+			"test-remote": {URL: ts.URL},
 		},
 	}
 
@@ -177,7 +177,7 @@ func TestNiks3FetcherUpdatedComparison(t *testing.T) {
 	// Subscribe to broker events
 	brokerEvents := bk.Subscribe()
 
-	// Trigger first fetch with newer timestamp
+	// Trigger first fetch
 	f.TriggerFetch([]string{"test-remote"})
 
 	// Wait for the Fetched event and verify Updated is true
@@ -194,11 +194,11 @@ func TestNiks3FetcherUpdatedComparison(t *testing.T) {
 	assert.NotNil(t, niks3Status.Niks3Status.Remotes[0].Updated)
 	assert.True(t, niks3Status.Niks3Status.Remotes[0].Updated.GetValue())
 
-	// Update config to point to older timestamp server
-	config.Remotes["test-remote"] = types.Niks3Remote{URL: olderTs.URL}
+	// Update config to point to the server with the same store path
+	config.Remotes["test-remote"] = types.Niks3Remote{URL: sameTs.URL}
 	f.config = config
 
-	// Trigger second fetch with older timestamp
+	// Trigger second fetch with the same store path
 	f.TriggerFetch([]string{"test-remote"})
 
 	// Wait for the Fetched event and verify Updated is false
@@ -209,9 +209,30 @@ func TestNiks3FetcherUpdatedComparison(t *testing.T) {
 		assert.False(c, fetched.Updated)
 	}, 5*time.Second, 100*time.Millisecond, "expected Fetched event with Updated=false")
 
-	// Verify the remote has Updated=false (older timestamp)
+	// Verify the remote has Updated=false (same store path)
 	state = f.GetState()
 	niks3Status = state.Status.(*protobuf.Fetcher_Niks3Status)
 	assert.NotNil(t, niks3Status.Niks3Status.Remotes[0].Updated)
 	assert.False(t, niks3Status.Niks3Status.Remotes[0].Updated.GetValue())
+
+	// Update config to point to the server with another store path
+	config.Remotes["test-remote"] = types.Niks3Remote{URL: otherTs.URL}
+	f.config = config
+
+	// Trigger third fetch with another store path
+	f.TriggerFetch([]string{"test-remote"})
+
+	// Wait for the Fetched event and verify Updated is true
+	assert.EventuallyWithT(t, func(c *assert.CollectT) {
+		e := <-brokerEvents
+		fetched := e.GetFetched()
+		assert.NotNil(c, fetched)
+		assert.True(c, fetched.Updated)
+	}, 5*time.Second, 100*time.Millisecond, "expected Fetched event with Updated=true")
+
+	// Verify the remote has the new store path
+	state = f.GetState()
+	niks3Status = state.Status.(*protobuf.Fetcher_Niks3Status)
+	assert.True(t, niks3Status.Niks3Status.Remotes[0].Updated.GetValue())
+	assert.Equal(t, "/nix/store/other-path", niks3Status.Niks3Status.Remotes[0].Pininfo.StorePath)
 }

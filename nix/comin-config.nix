@@ -20,7 +20,7 @@ rec {
     fetcher.git.system_attr = cfg.services.comin.fetcher.git.systemAttr;
     fetcher.git.remotes = cfg.services.comin.fetcher.git.remotes;
 
-    fetcher.nixk3.remotes = cfg.services.comin.fetcher.niks3.remotes;
+    fetcher.niks3.remotes = cfg.services.comin.fetcher.niks3.remotes;
 
     exporter = {
       listen_address = cfg.services.comin.exporter.listen_address;

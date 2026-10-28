@@ -10,7 +10,7 @@ import (
 	"github.com/nlewo/comin/internal/config"
 	"github.com/nlewo/comin/internal/deployer"
 	executorPkg "github.com/nlewo/comin/internal/executor"
-	"github.com/nlewo/comin/internal/fetcher"
+	fetcherPkg "github.com/nlewo/comin/internal/fetcher"
 	"github.com/nlewo/comin/internal/http"
 	"github.com/nlewo/comin/internal/manager"
 	"github.com/nlewo/comin/internal/prometheus"
@@ -25,8 +25,8 @@ import (
 
 // getGitFromGeneration is a helper function to safely extract Git source from a Generation
 func getGitFromGeneration(g *protobuf.Generation) *protobuf.Git {
-	if g != nil && g.Source != nil {
-		return g.Source.GetGit()
+	if git := g.GetSource().GetGit(); git != nil {
+		return git
 	}
 	return &protobuf.Git{}
 }
@@ -61,7 +61,12 @@ var runCmd = &cobra.Command{
 		}
 
 		var executor executorPkg.Executor
-		executor, err = executorPkg.NewGit(cfg.Fetcher.Git.RepositoryType, gitConfig.Path, gitConfig.Submodules)
+		switch cfg.Fetcher.Type {
+		case "niks3":
+			executor, err = executorPkg.NewNiks3()
+		default:
+			executor, err = executorPkg.NewGit(cfg.Fetcher.Git.RepositoryType, gitConfig.Path, gitConfig.Submodules)
+		}
 		if err != nil {
 			logrus.Error(err)
 			os.Exit(1)
@@ -98,16 +103,24 @@ var runCmd = &cobra.Command{
 			lastDeployment = ld
 			metrics.SetDeploymentInfo(git.SelectedCommitId, ld.Status)
 		}
-		repository, err := repository.New(gitConfig, mainCommitId, metrics)
-		if err != nil {
-			logrus.Errorf("Failed to initialize the repository: %s", err)
-			os.Exit(1)
-		}
-
-		fetcher := fetcher.NewGitFetcher(repository, broker)
-		fetcher.Start(cmd.Context())
+		var fetcher fetcherPkg.Fetcher
 		sched := scheduler.New()
-		sched.FetchRemotes(fetcher, gitConfig.Remotes)
+		switch cfg.Fetcher.Type {
+		case "niks3":
+			fetcher = fetcherPkg.NewNiks3Fetcher(cfg.Fetcher.Niks3, broker)
+			fetcher.Start(cmd.Context())
+			sched.FetchNiks3Remotes(fetcher, cfg.Fetcher.Niks3.Remotes)
+		default:
+			repository, err := repository.New(gitConfig, mainCommitId, metrics)
+			if err != nil {
+				logrus.Errorf("Failed to initialize the repository: %s", err)
+				os.Exit(1)
+			}
+
+			fetcher = fetcherPkg.NewGitFetcher(repository, broker)
+			fetcher.Start(cmd.Context())
+			sched.FetchRemotes(fetcher, gitConfig.Remotes)
+		}
 
 		builder := builder.New(store, executor, broker, gitConfig.Path, gitConfig.Dir, gitConfig.SystemAttr, cfg.Hostname, gitConfig.Submodules, time.Duration(cfg.EvalTimeout)*time.Second, time.Duration(cfg.BuildTimeout)*time.Second)
 		deployer := deployer.New(store, executor.Deploy, lastDeployment, cfg.PostDeploymentCommand, broker)
@@ -132,6 +145,10 @@ var runCmd = &cobra.Command{
 			configurationOperations[r.Name] = make(map[string]string)
 			configurationOperations[r.Name][r.Branches.Main.Name] = r.Branches.Main.Operation
 			configurationOperations[r.Name][r.Branches.Testing.Name] = r.Branches.Testing.Operation
+		}
+		// niks3 remotes have no branch: they use the empty branch name
+		for name, r := range cfg.Fetcher.Niks3.Remotes {
+			configurationOperations[name] = map[string]string{"": r.Operation}
 		}
 		manager := manager.New(store, metrics, sched, fetcher, builder, deployer, machineId, cfg.Hostname, executor, buildConfirmer, deployConfirmer, broker, configurationOperations)
 

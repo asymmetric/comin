@@ -24,7 +24,7 @@ func New() Scheduler {
 	return sched
 }
 
-func (s Scheduler) FetchRemotes(fetcher *fetcher.GitFetcher, remotes []types.Remote) {
+func (s Scheduler) FetchRemotes(fetcher fetcher.Fetcher, remotes []types.Remote) {
 	for _, remote := range remotes {
 		if remote.Poller.Period != 0 {
 			logrus.Infof("scheduler: starting the period job for the remote '%s' with period %ds", remote.Name, remote.Poller.Period)
@@ -40,6 +40,27 @@ func (s Scheduler) FetchRemotes(fetcher *fetcher.GitFetcher, remotes []types.Rem
 				),
 				gocron.WithSingletonMode(gocron.LimitModeReschedule),
 				gocron.WithName(fmt.Sprintf("fetch-remote-%s", remote.Name)),
+			)
+		}
+	}
+}
+
+func (s Scheduler) FetchNiks3Remotes(fetcher fetcher.Fetcher, remotes map[string]types.Niks3Remote) {
+	for name, remote := range remotes {
+		if remote.Poller.Period != 0 {
+			logrus.Infof("scheduler: starting the period job for the niks3 remote '%s' with period %ds", name, remote.Poller.Period)
+			_, _ = s.s.NewJob(
+				gocron.DurationJob(
+					time.Duration(remote.Poller.Period)*time.Second,
+				),
+				gocron.NewTask(
+					func() {
+						logrus.Debugf("scheduler: running task for niks3 remote %s", name)
+						fetcher.TriggerFetch([]string{name})
+					},
+				),
+				gocron.WithSingletonMode(gocron.LimitModeReschedule),
+				gocron.WithName(fmt.Sprintf("fetch-niks3-remote-%s", name)),
 			)
 		}
 	}

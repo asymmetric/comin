@@ -42,7 +42,7 @@ func (n *Niks3) Build(ctx context.Context, drvPath, outPath string, stdout, stdi
 		"-r",
 		outPath,
 	}
-	err = runNixCommand(ctx, "nix-store -r", args, stdout, stdin)
+	err = runNixCommand(ctx, "nix-store", args, stdout, stdin)
 	if err != nil {
 		return
 	}

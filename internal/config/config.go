@@ -46,6 +46,12 @@ func Read(path string) (config types.Configuration, err error) {
 		}
 
 	}
+	for name, remote := range config.Fetcher.Niks3.Remotes {
+		if remote.Operation == "" {
+			remote.Operation = "switch"
+			config.Fetcher.Niks3.Remotes[name] = remote
+		}
+	}
 
 	if config.ApiServer.ListenAddress == "" {
 		config.ApiServer.ListenAddress = "127.0.0.1"
