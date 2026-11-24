@@ -101,7 +101,7 @@ var runCmd = &cobra.Command{
 			git := getGitFromGeneration(ld.Generation)
 			mainCommitId = git.MainCommitId
 			lastDeployment = ld
-			metrics.SetDeploymentInfo(git.SelectedCommitId, ld.Status)
+			metrics.SetDeploymentInfo(git.SelectedCommitId, ld.GetGeneration().GetOutPath(), ld.Status)
 		}
 		var fetcher fetcherPkg.Fetcher
 		sched := scheduler.New()

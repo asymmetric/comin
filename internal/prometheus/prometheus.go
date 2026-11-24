@@ -39,7 +39,7 @@ func New() Prometheus {
 	deploymentInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "comin_deployment_info",
 		Help: "Info of the last deployment.",
-	}, []string{"commit_id", "status"})
+	}, []string{"commit_id", "out_path", "status"})
 	fetchCounter := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "comin_fetch_count",
 		Help: "Number of fetches per status",
@@ -116,7 +116,7 @@ func Subscribe(broker *brokerPkg.Broker, metrics *Prometheus) {
 				d := m.GetDeploymentFinishedType().GetDeployment()
 				metrics.lastDeploymentFailed.Set(boolToFloat64(d.GetStatus() == "failed"))
 				git := getGitFromGeneration(d.GetGeneration())
-				metrics.SetDeploymentInfo(git.GetMainCommitId(), d.GetStatus())
+				metrics.SetDeploymentInfo(git.GetMainCommitId(), d.GetGeneration().GetOutPath(), d.GetStatus())
 
 			case m.GetSuspend() != nil:
 				metrics.isSuspended.Set(boolToFloat64(true))
@@ -162,9 +162,9 @@ func (m Prometheus) SetBuildInfo(version string) {
 	m.buildInfo.With(prometheus.Labels{"version": version}).Set(1)
 }
 
-func (m Prometheus) SetDeploymentInfo(commitId, status string) {
+func (m Prometheus) SetDeploymentInfo(commitId, outPath, status string) {
 	m.deploymentInfo.Reset()
-	m.deploymentInfo.With(prometheus.Labels{"commit_id": commitId, "status": status}).Set(1)
+	m.deploymentInfo.With(prometheus.Labels{"commit_id": commitId, "out_path": outPath, "status": status}).Set(1)
 }
 
 func boolToFloat64(b bool) float64 {

@@ -42,5 +42,14 @@ pkgs.testers.runNixOSTest {
     machine.succeed("readlink -f /run/current-system > /srv/pins/main")
     machine.wait_until_succeeds("comin status | grep -q 'Deployment succeeded'", 120)
     machine.succeed("comin status | grep -q \"Outpath $(readlink -f /run/current-system)\"")
+
+    # The exporter reports the deployed toplevel.
+    machine.wait_until_succeeds(
+      "${pkgs.curl}/bin/curl -fsS http://127.0.0.1:4243/metrics"
+      + " | grep '^comin_deployment_info{'"
+      + " | grep -F \"out_path=\\\"$(readlink -f /run/current-system)\\\"\""
+      + " | grep -qF 'status=\"done\"'",
+      30,
+    )
   '';
 }
