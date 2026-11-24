@@ -95,9 +95,9 @@ func (s *Store) NewGenerationFromNiks3(hostname, repositoryDir, systemAttr strin
 	var updatedAt time.Time
 	var selectedRemote *protobuf.PinInfo
 	for _, remote := range niks3.Remotes {
-		if remote.Pininfo.UpdatedAt.AsTime().After(updatedAt) {
-			updatedAt = remote.Pininfo.UpdatedAt.AsTime()
-			selectedRemote = remote.Pininfo
+		if remote.GetPininfo().GetUpdatedAt().AsTime().After(updatedAt) {
+			updatedAt = remote.GetPininfo().GetUpdatedAt().AsTime()
+			selectedRemote = remote.GetPininfo()
 		}
 	}
 
