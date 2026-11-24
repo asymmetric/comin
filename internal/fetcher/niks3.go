@@ -14,6 +14,7 @@ import (
 	"github.com/nlewo/comin/internal/types"
 	"github.com/nlewo/comin/pkg/protobuf"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -51,16 +52,24 @@ func (f *Niks3Fetcher) TriggerFetch(remotes []string) {
 }
 
 func (f *Niks3Fetcher) GetState() *protobuf.Fetcher {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
 	return &protobuf.Fetcher{
 		IsFetching: wrapperspb.Bool(f.isFetching.Load()),
 		Status: &protobuf.Fetcher_Niks3Status{
-			Niks3Status: &protobuf.Niks3Status{
-				Remotes: f.remotes,
-			},
+			Niks3Status: f.status(),
 		},
 	}
+}
+
+// status returns a copy of the remotes, which can be safely sent to
+// other goroutines.
+func (f *Niks3Fetcher) status() *protobuf.Niks3Status {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	s := &protobuf.Niks3Status{}
+	for _, r := range f.remotes {
+		s.Remotes = append(s.Remotes, proto.Clone(r).(*protobuf.Niks3Remote))
+	}
+	return s
 }
 
 // pinInfoJSON is a temporary struct for unmarshaling JSON with string timestamps
@@ -177,9 +186,7 @@ func (f *Niks3Fetcher) Start(ctx context.Context) {
 			f.broker.Publish(&protobuf.Event{
 				Type: &protobuf.Event_Fetched_{Fetched: &protobuf.Event_Fetched{
 					Type: &protobuf.Event_Fetched_Niks3Status{
-						Niks3Status: &protobuf.Niks3Status{
-							Remotes: f.remotes,
-						},
+						Niks3Status: f.status(),
 					},
 					Updated:  updated,
 					Verified: false,
