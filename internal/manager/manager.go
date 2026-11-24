@@ -119,7 +119,9 @@ func (m *Manager) DeploymentLatestSubmit(operation string) error {
 	}
 	// If no operation is provided, use default based on branch type
 	if operation == "" {
-		if latest.Generation.Source != nil && latest.Generation.Source.GetGit() != nil && latest.Generation.Source.GetGit().SelectedBranchIsTesting != nil && latest.Generation.Source.GetGit().SelectedBranchIsTesting.Value {
+		if latest.Generation.GetSource().GetNiks3() != nil {
+			operation = m.getOperation(latest.Generation)
+		} else if latest.Generation.Source != nil && latest.Generation.Source.GetGit() != nil && latest.Generation.Source.GetGit().SelectedBranchIsTesting != nil && latest.Generation.Source.GetGit().SelectedBranchIsTesting.Value {
 			operation = "test"
 		} else {
 			operation = "switch"
@@ -217,9 +219,8 @@ func (m *Manager) FetchAndBuild(ctx context.Context) {
 					continue
 				}
 				if generation.BuildErr == "" {
-					git := generation.Source.GetGit()
-					logrus.Infof("manager: a generation is available for deployment with commit %s", git.SelectedCommitId)
-					operation := m.getOperationFromConfigurationOperations(git.SelectedRemoteName, git.SelectedBranchName)
+					logrus.Infof("manager: a generation is available for deployment from %s", describeSource(&generation))
+					operation := m.getOperation(&generation)
 					if !m.deployer.IsAlreadyDeployed(&generation, operation) {
 						m.DeployConfirmer.Submit(generationUUID)
 					}
@@ -232,13 +233,33 @@ func (m *Manager) FetchAndBuild(ctx context.Context) {
 					logrus.Error(err)
 					continue
 				}
-				git := generation.Source.GetGit()
-				operation := m.getOperationFromConfigurationOperations(git.SelectedRemoteName, git.SelectedBranchName)
+				operation := m.getOperation(&generation)
 				reason := fmt.Sprintf("The generation %s needs to be deployed", generationUUID)
 				m.deployer.Submit(&generation, operation, false, reason)
 			}
 		}
 	}()
+}
+
+func describeSource(g *protobuf.Generation) string {
+	if pin := g.GetSource().GetNiks3(); pin != nil {
+		return fmt.Sprintf("the niks3 pin %s (%s)", pin.Name, pin.StorePath)
+	}
+	if git := g.GetSource().GetGit(); git != nil {
+		return fmt.Sprintf("the commit %s", git.SelectedCommitId)
+	}
+	return "an unknown source"
+}
+
+// getOperation returns the configured operation for the remote (and
+// branch, for git) a generation comes from. niks3 remotes are stored in
+// ConfigurationOperations with an empty branch name.
+func (m *Manager) getOperation(g *protobuf.Generation) string {
+	if pin := g.GetSource().GetNiks3(); pin != nil {
+		return m.getOperationFromConfigurationOperations(pin.Name, "")
+	}
+	git := g.GetSource().GetGit()
+	return m.getOperationFromConfigurationOperations(git.GetSelectedRemoteName(), git.GetSelectedBranchName())
 }
 
 // ConfigurationOperations is a map describing the operation associated
