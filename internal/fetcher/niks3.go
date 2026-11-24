@@ -2,10 +2,10 @@ package fetcher
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,68 +72,32 @@ func (f *Niks3Fetcher) status() *protobuf.Niks3Status {
 	return s
 }
 
-// pinInfoJSON is a temporary struct for unmarshaling JSON with string timestamps
-type pinInfoJSON struct {
-	Name      string `json:"name"`
-	StorePath string `json:"store_path"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
-}
-
-func fetch(route string) (*protobuf.PinInfo, error) {
+// fetch returns the store path of a pin. niks3 serves a pin as a plain
+// text store path at <cache-url>/pins/<name>.
+func fetch(route string) (string, error) {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
 	resp, err := client.Get(route)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() // nolint: errcheck
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected HTTP status %s", resp.Status)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	var pinInfoJSON pinInfoJSON
-	err = json.Unmarshal(body, &pinInfoJSON)
-	if err != nil {
-		return nil, err
+	storePath := strings.TrimSpace(string(body))
+	if !strings.HasPrefix(storePath, "/nix/store/") || strings.ContainsAny(storePath, " \t\r\n") {
+		return "", fmt.Errorf("the pin content '%.100s' is not a store path", storePath)
 	}
-
-	// parseTimestamp tries multiple formats to parse a timestamp string
-	parseTimestamp := func(s string) (*timestamppb.Timestamp, error) {
-		if s == "" {
-			return nil, nil
-		}
-		// Try RFC3339 first (e.g., "2024-01-02T12:00:00Z")
-		if parsed, err := time.Parse(time.RFC3339, s); err == nil {
-			return timestamppb.New(parsed), nil
-		}
-		// Try date only (e.g., "2024-01-02")
-		if parsed, err := time.Parse("2006-01-02", s); err == nil {
-			return timestamppb.New(parsed), nil
-		}
-		return nil, fmt.Errorf("failed to parse timestamp: %s", s)
-	}
-
-	// Convert string timestamps to timestamppb.Timestamp
-	createdAt, err := parseTimestamp(pinInfoJSON.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-
-	updatedAt, err := parseTimestamp(pinInfoJSON.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-
-	return &protobuf.PinInfo{
-		Name:      pinInfoJSON.Name,
-		StorePath: pinInfoJSON.StorePath,
-		CreatedAt: createdAt,
-		UpdatedAt: updatedAt,
-	}, nil
+	return storePath, nil
 }
 
 func (f *Niks3Fetcher) Start(ctx context.Context) {
@@ -145,7 +109,7 @@ func (f *Niks3Fetcher) Start(ctx context.Context) {
 			logrus.Debugf("niks3 fetcher: remotes submitted: %v", submittedRemotes)
 			f.isFetching.Store(true)
 			for _, remoteName := range submittedRemotes {
-				pinInfo, err := fetch(f.config.Remotes[remoteName].URL)
+				storePath, err := fetch(f.config.Remotes[remoteName].URL)
 				errMsg := ""
 				if err != nil {
 					logrus.Errorf("niks3 fetcher: failed to fetch remote %s: %v", remoteName, err)
@@ -158,27 +122,23 @@ func (f *Niks3Fetcher) Start(ctx context.Context) {
 						r.Fetched = wrapperspb.Bool(err == nil)
 						r.FetchedAt = timestamppb.New(time.Now().UTC())
 						r.Updated = wrapperspb.Bool(false)
-						if err == nil {
-							// Check if this is an update (newer timestamp)
-							if r.Pininfo != nil && pinInfo.UpdatedAt != nil && r.Pininfo.UpdatedAt != nil {
-								if pinInfo.UpdatedAt.AsTime().After(r.Pininfo.UpdatedAt.AsTime()) {
-									r.Updated = wrapperspb.Bool(true)
-									updated = true
-								}
-							} else if r.Pininfo == nil || r.Pininfo.UpdatedAt == nil {
-								// First fetch or no previous timestamp
-								if pinInfo.UpdatedAt != nil {
-									r.Updated = wrapperspb.Bool(true)
-									updated = true
-								}
+						// The pin is updated when its store path changes
+						if err == nil && (r.Pininfo == nil || r.Pininfo.StorePath != storePath) {
+							now := timestamppb.New(time.Now().UTC())
+							r.Pininfo = &protobuf.PinInfo{
+								Name:      remoteName,
+								StorePath: storePath,
+								CreatedAt: now,
+								UpdatedAt: now,
 							}
-							r.Pininfo = pinInfo
+							r.Updated = wrapperspb.Bool(true)
+							updated = true
 						}
 					}
 				}
 				f.mu.Unlock()
 				if err == nil {
-					logrus.Debugf("niks3 fetcher: fetched remote %s, pin: %s", remoteName, pinInfo.Name)
+					logrus.Debugf("niks3 fetcher: fetched remote %s, pin: %s", remoteName, storePath)
 				}
 			}
 			f.isFetching.Store(false)
