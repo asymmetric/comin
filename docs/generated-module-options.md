@@ -413,6 +413,14 @@ submodule
 
 
 
+*Default:*
+
+```nix
+{ }
+```
+
+
+
 ## services\.comin\.fetcher\.git\.remotes
 
 
@@ -873,6 +881,14 @@ submodule
 
 
 
+*Default:*
+
+```nix
+{ }
+```
+
+
+
 ## services\.comin\.fetcher\.niks3\.remotes
 
 
@@ -883,6 +899,14 @@ The nixks3 remotes\.
 
 *Type:*
 attribute set of (submodule)
+
+
+
+*Default:*
+
+```nix
+{ }
+```
 
 
 

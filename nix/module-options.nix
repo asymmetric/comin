@@ -49,6 +49,7 @@ let
       options = {
         remotes = mkOption {
           type = attrsOf niks3Remote;
+          default = { };
           description = ''
             The nixks3 remotes.
           '';
@@ -318,12 +319,14 @@ in
               };
               git = mkOption {
                 type = fetcherGitOptions;
+                default = { };
                 description = ''
                   Configuration for the git fetcher.
                 '';
               };
               niks3 = mkOption {
                 type = fetcherNiks3Options;
+                default = { };
                 description = ''
                   Configuration for the niks3 fetcher.
                 '';
