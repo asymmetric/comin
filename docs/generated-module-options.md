@@ -886,6 +886,69 @@ attribute set of (submodule)
 
 
 
+## services\.comin\.fetcher\.niks3\.remotes\.\<name>\.operation
+
+
+
+The switch-to-configuration operation used to deploy the Niks3 pin\.
+
+
+
+*Type:*
+one of “switch”, “test”, “boot”
+
+
+
+*Default:*
+
+```nix
+"switch"
+```
+
+
+
+## services\.comin\.fetcher\.niks3\.remotes\.\<name>\.poller
+
+
+
+The poller options\.
+
+
+
+*Type:*
+submodule
+
+
+
+*Default:*
+
+```nix
+{ }
+```
+
+
+
+## services\.comin\.fetcher\.niks3\.remotes\.\<name>\.poller\.period
+
+
+
+The poller period in seconds\.
+
+
+
+*Type:*
+signed integer
+
+
+
+*Default:*
+
+```nix
+60
+```
+
+
+
 ## services\.comin\.fetcher\.niks3\.remotes\.\<name>\.url
 
 

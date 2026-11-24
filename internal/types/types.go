@@ -10,8 +10,9 @@ type Niks3Fetcher struct {
 }
 
 type Niks3Remote struct {
-	URL    string
-	Poller Poller `yaml:"poller"`
+	URL       string
+	Operation string `yaml:"operation"`
+	Poller    Poller `yaml:"poller"`
 }
 
 type Remote struct {

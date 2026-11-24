@@ -16,6 +16,32 @@ let
             The URL of the Niks3 pin.
           '';
         };
+        operation = mkOption {
+          type = enum [
+            "switch"
+            "test"
+            "boot"
+          ];
+          default = "switch";
+          description = ''
+            The switch-to-configuration operation used to deploy the Niks3 pin.
+          '';
+        };
+        poller = mkOption {
+          default = { };
+          description = "The poller options.";
+          type = submodule {
+            options = {
+              period = mkOption {
+                type = int;
+                default = 60;
+                description = ''
+                  The poller period in seconds.
+                '';
+              };
+            };
+          };
+        };
       };
   };
   fetcherNiks3Options =
